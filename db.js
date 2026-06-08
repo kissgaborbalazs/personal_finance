@@ -1,7 +1,17 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true }
+});
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const authRepo = {
+    getSession:  ()             => db.auth.getSession(),
+    signIn:      (email, pass)  => db.auth.signInWithPassword({ email, password: pass }),
+    signOut:     ()             => db.auth.signOut(),
+    onAuthChange:(cb)           => db.auth.onAuthStateChange(cb),
+};
 
 // ── Segédfüggvény: tétel aktív-e adott hónapban ──────────────────────────────
 export function isItemActiveInMonth(item, year, month) {

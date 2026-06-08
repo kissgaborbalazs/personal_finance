@@ -512,3 +512,75 @@ body {
     font-size: 0.82rem;
     line-height: 1.6;
 }
+
+/* ── Login képernyő ───────────────────────────────────────────────────────── */
+.login-screen {
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+}
+
+.login-box {
+    width: 100%;
+    max-width: 380px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 28px;
+}
+
+.login-logo {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.login-sub {
+    font-size: 0.78rem;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 28px;
+}
+
+.login-error {
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    margin-bottom: 16px;
+}
+
+/* ── Logout gomb ──────────────────────────────────────────────────────────── */
+.logout-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text3);
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+.logout-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* ── EUR árfolyam sáv ─────────────────────────────────────────────────────── */
+.eur-rate {
+    text-align: right;
+    padding: 4px 16px;
+    font-size: 0.68rem;
+    color: var(--text3);
+    letter-spacing: 0.05em;
+}

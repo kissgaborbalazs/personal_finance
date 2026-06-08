@@ -1,46 +1,78 @@
-import { itemsRepo, valuesRepo, balancesRepo, rateRepo, isItemActiveInMonth } from './db.js';
+import { itemsRepo, valuesRepo, balancesRepo, rateRepo, authRepo, isItemActiveInMonth } from './db.js';
 
 // ── Állapot ───────────────────────────────────────────────────────────────────
 const state = {
     year: new Date().getFullYear(),
     month: new Date().getMonth() + 1,
-    view: 'month',      // 'month' | 'year' | 'settings'
+    view: 'month',
     items: [],
-    values: {},         // { item_id: { amount, is_paid } }
-    balances: {},       // { item_id: balance }
+    values: {},
+    balances: {},
     eurRate: 395,
     loading: true,
+    user: null,
 };
 
 const MONTHS_HU = ['Január','Február','Március','Április','Május','Június',
                    'Július','Augusztus','Szeptember','Október','November','December'];
 
-// ── Formázás ──────────────────────────────────────────────────────────────────
-const fmt = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
+const fmt    = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
 const fmtEur = (n) => n.toLocaleString('hu-HU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €';
 
-// ── Aktív tételek az adott hónapban ──────────────────────────────────────────
 const activeItems = (type) =>
     state.items.filter(i => i.type === type && i.is_active && isItemActiveInMonth(i, state.year, state.month));
 
-// ── Összeg lekérése (default az item-en tárolt vagy 0) ───────────────────────
-const getAmount = (item) => state.values[item.id]?.amount ?? 0;
-const isPaid   = (item) => state.values[item.id]?.is_paid ?? false;
+const getAmount  = (item) => state.values[item.id]?.amount ?? 0;
+const isPaid     = (item) => state.values[item.id]?.is_paid ?? false;
 const getBalance = (item) => state.balances[item.id] ?? 0;
-const toHUF = (item, val) => item.currency === 'EUR' ? val * state.eurRate : val;
+const toHUF      = (item, val) => item.currency === 'EUR' ? val * state.eurRate : val;
+
+// ── Auth: login képernyő ──────────────────────────────────────────────────────
+function renderLogin(errorMsg = '') {
+    document.getElementById('app').innerHTML = `
+      <div class="login-screen">
+        <div class="login-box">
+          <div class="login-logo">HáziPénz</div>
+          <div class="login-sub">Háztartási pénzügyek</div>
+          ${errorMsg ? `<div class="login-error">${errorMsg}</div>` : ''}
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input class="form-input" id="l-email" type="email" placeholder="email@example.com" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Jelszó</label>
+            <input class="form-input" id="l-pass" type="password" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="app.login()">Belépés</button>
+        </div>
+      </div>`;
+    document.getElementById('l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') app.login(); });
+}
+
+async function doLogin() {
+    const email = document.getElementById('l-email')?.value?.trim();
+    const pass  = document.getElementById('l-pass')?.value;
+    if (!email || !pass) return;
+    const { error } = await authRepo.signIn(email, pass);
+    if (error) renderLogin('Hibás email vagy jelszó');
+}
+
+async function doLogout() {
+    await authRepo.signOut();
+    state.user = null;
+    renderLogin();
+}
 
 // ── Betöltés ──────────────────────────────────────────────────────────────────
 async function loadData() {
     state.loading = true;
     render();
-
     const [itemsRes, valuesRes, balancesRes, rate] = await Promise.all([
         itemsRepo.getAll(),
         valuesRepo.getForMonth(state.year, state.month),
         balancesRepo.getForMonth(state.year, state.month),
         rateRepo.get(),
     ]);
-
     state.items    = itemsRes.data ?? [];
     state.eurRate  = rate;
     state.values   = Object.fromEntries((valuesRes.data ?? []).map(v => [v.item_id, v]));
@@ -51,8 +83,7 @@ async function loadData() {
 
 // ── Kifizetés toggle ──────────────────────────────────────────────────────────
 async function togglePaid(item) {
-    const current = isPaid(item);
-    const newVal = !current;
+    const newVal = !isPaid(item);
     if (!state.values[item.id]) state.values[item.id] = { amount: 0, is_paid: false };
     state.values[item.id].is_paid = newVal;
     render();
@@ -79,13 +110,11 @@ async function saveBalance(item, rawValue) {
 
 // ── Hónap navigáció ───────────────────────────────────────────────────────────
 function prevMonth() {
-    if (state.month === 1) { state.month = 12; state.year--; }
-    else state.month--;
+    state.month === 1 ? (state.month = 12, state.year--) : state.month--;
     loadData();
 }
 function nextMonth() {
-    if (state.month === 12) { state.month = 1; state.year++; }
-    else state.month++;
+    state.month === 12 ? (state.month = 1, state.year++) : state.month++;
     loadData();
 }
 
@@ -156,9 +185,9 @@ function showAddItemModal(type) {
 window.closeModal = () => document.getElementById('modal')?.remove();
 
 window.submitAddItem = async (type) => {
-    const name    = document.getElementById('f-name').value.trim();
+    const name     = document.getElementById('f-name').value.trim();
     const currency = document.getElementById('f-currency').value;
-    const repeat  = parseInt(document.getElementById('f-repeat').value) || 1;
+    const repeat   = parseInt(document.getElementById('f-repeat').value) || 1;
     const sy = parseInt(document.getElementById('f-sy').value);
     const sm = parseInt(document.getElementById('f-sm').value);
     const ey = document.getElementById('f-ey').value ? parseInt(document.getElementById('f-ey').value) : null;
@@ -167,8 +196,7 @@ window.submitAddItem = async (type) => {
     closeModal();
     const { data, error } = await itemsRepo.insert({
         name, type, currency, repeat_every_x_months: repeat,
-        start_year: sy, start_month: sm,
-        end_year: ey, end_month: em,
+        start_year: sy, start_month: sm, end_year: ey, end_month: em,
         sort_order: state.items.filter(i => i.type === type).length
     });
     if (error) { toast('Hiba: ' + error.message, 'error'); return; }
@@ -194,10 +222,10 @@ function makeAmountEditable(item, el, isSaving = false) {
 
 // ── Render: havi nézet ────────────────────────────────────────────────────────
 function renderMonthView() {
-    const incomes   = activeItems('income');
-    const expenses  = activeItems('expense');
-    const savings   = activeItems('saving');
-    const liquids   = activeItems('liquid');
+    const incomes  = activeItems('income');
+    const expenses = activeItems('expense');
+    const savings  = activeItems('saving');
+    const liquids  = activeItems('liquid');
 
     const totalIncome  = incomes.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
     const totalExpense = expenses.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
@@ -220,11 +248,7 @@ function renderMonthView() {
     const liquidCard = (item) => `
       <div class="liquid-card" onclick="app.editBalance('${item.id}', this)">
         <div class="liquid-name">${item.name}</div>
-        <div class="liquid-balance">${
-            item.currency === 'EUR'
-            ? fmtEur(getBalance(item))
-            : fmt(getBalance(item))
-        }</div>
+        <div class="liquid-balance">${item.currency === 'EUR' ? fmtEur(getBalance(item)) : fmt(getBalance(item))}</div>
         ${item.currency === 'EUR' && getBalance(item) ? `<div class="liquid-balance-eur">≈ ${fmt(getBalance(item) * state.eurRate)}</div>` : ''}
       </div>`;
 
@@ -258,9 +282,7 @@ function renderMonthView() {
           <span class="section-total">${fmt(totalIncome)}</span>
           <button class="add-btn" onclick="app.addItem('income')">+ Hozzáad</button>
         </div>
-        <div class="item-list">${
-            incomes.length ? incomes.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs bevétel ebben a hónapban</div>'
-        }</div>
+        <div class="item-list">${incomes.length ? incomes.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs bevétel ebben a hónapban</div>'}</div>
       </div>
 
       <div class="section">
@@ -269,9 +291,7 @@ function renderMonthView() {
           <span class="section-total">${fmt(totalExpense)}</span>
           <button class="add-btn" onclick="app.addItem('expense')">+ Hozzáad</button>
         </div>
-        <div class="item-list">${
-            expenses.length ? expenses.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs kiadás ebben a hónapban</div>'
-        }</div>
+        <div class="item-list">${expenses.length ? expenses.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs kiadás ebben a hónapban</div>'}</div>
       </div>
 
       <div class="section">
@@ -280,9 +300,7 @@ function renderMonthView() {
           <span class="section-total">${fmt(totalSaving)}</span>
           <button class="add-btn" onclick="app.addItem('saving')">+ Hozzáad</button>
         </div>
-        <div class="item-list">${
-            savings.length ? savings.map(i => itemRow(i, true)).join('') : '<div class="empty-state">Nincs megtakarítás</div>'
-        }</div>
+        <div class="item-list">${savings.length ? savings.map(i => itemRow(i, true)).join('') : '<div class="empty-state">Nincs megtakarítás</div>'}</div>
       </div>
 
       <div class="section">
@@ -291,20 +309,18 @@ function renderMonthView() {
           <span class="section-total" style="color:var(--blue)">${fmt(totalLiquid)}</span>
           <button class="add-btn" onclick="app.addItem('liquid')">+ Hozzáad</button>
         </div>
-        <div class="liquid-grid">${
-            liquids.length ? liquids.map(liquidCard).join('') : '<div class="empty-state">Nincs likvid számla</div>'
-        }</div>
+        <div class="liquid-grid">${liquids.length ? liquids.map(liquidCard).join('') : '<div class="empty-state">Nincs likvid számla</div>'}</div>
       </div>`;
 }
 
 // ── Render: fő ────────────────────────────────────────────────────────────────
 function render() {
-    const app = document.getElementById('app');
+    const appEl = document.getElementById('app');
     if (state.loading) {
-        app.innerHTML = `<div class="loading"><div class="spinner"></div>Betöltés...</div>`;
+        appEl.innerHTML = `<div class="loading"><div class="spinner"></div>Betöltés...</div>`;
         return;
     }
-    app.innerHTML = `
+    appEl.innerHTML = `
       <header class="app-header">
         <span class="app-title">HáziPénz</span>
         <div class="month-nav">
@@ -312,8 +328,9 @@ function render() {
           <span class="month-label">${MONTHS_HU[state.month - 1]} ${state.year}</span>
           <button onclick="app.nextMonth()">›</button>
         </div>
-        <span style="font-size:0.7rem;color:var(--text3)">1€ = ${Math.round(state.eurRate)} Ft</span>
+        <button class="logout-btn" onclick="app.logout()" title="Kijelentkezés">⏻</button>
       </header>
+      <div class="eur-rate">1€ = ${Math.round(state.eurRate)} Ft</div>
       <main>${renderMonthView()}</main>
       <nav class="bottom-nav">
         <button class="nav-btn active"><span class="icon">◎</span>Hónap</button>
@@ -327,15 +344,11 @@ function render() {
 window.app = {
     prevMonth,
     nextMonth,
+    login:   doLogin,
+    logout:  doLogout,
     addItem: showAddItemModal,
-    togglePaid: (id) => {
-        const item = state.items.find(i => i.id === id);
-        if (item) togglePaid(item);
-    },
-    editAmount: (id, el, isSaving) => {
-        const item = state.items.find(i => i.id === id);
-        if (item) makeAmountEditable(item, el, isSaving);
-    },
+    togglePaid: (id) => { const item = state.items.find(i => i.id === id); if (item) togglePaid(item); },
+    editAmount: (id, el, isSaving) => { const item = state.items.find(i => i.id === id); if (item) makeAmountEditable(item, el, isSaving); },
     editBalance: (id, card) => {
         const item = state.items.find(i => i.id === id);
         if (!item) return;
@@ -344,5 +357,16 @@ window.app = {
     },
 };
 
-// ── Indítás ───────────────────────────────────────────────────────────────────
-loadData();
+// ── Indítás: session ellenőrzés ───────────────────────────────────────────────
+authRepo.onAuthChange((event, session) => {
+    state.user = session?.user ?? null;
+    if (state.user) loadData();
+    else renderLogin();
+});
+
+(async () => {
+    const { data } = await authRepo.getSession();
+    state.user = data?.session?.user ?? null;
+    if (state.user) loadData();
+    else renderLogin();
+})();
