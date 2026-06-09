@@ -14,7 +14,9 @@ const MONTHS_HU = ['Január','Február','Március','Április','Május','Június'
 const fmt    = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
 const fmtEur = (n) => n.toLocaleString('hu-HU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €';
 
-const activeItems  = (type) => state.items.filter(i => i.type === type && i.is_active && isItemActiveInMonth(i, state.year, state.month));
+const activeItems  = (type) => type === 'saving'
+    ? state.items.filter(i => i.type === type && i.is_active)
+    : state.items.filter(i => i.type === type && i.is_active && isItemActiveInMonth(i, state.year, state.month));
 const getAmount    = (item) => state.values[item.id]?.amount ?? item.default_amount ?? 0;
 const isPaid       = (item) => state.values[item.id]?.is_paid ?? false;
 const getBalance   = (item) => state.balances[item.id] ?? 0;
@@ -126,6 +128,7 @@ function showEditItemModal(id) {
 }
 
 function showItemModal(item, title, isEdit) {
+    const isSaving = item.type === 'saving';
     const html = `
     <div class="modal-overlay" id="modal">
       <div class="modal">
@@ -136,28 +139,30 @@ function showItemModal(item, title, isEdit) {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">Alapértelmezett összeg</label>
-            <input class="form-input" id="f-default" type="number" value="${item.default_amount ?? ''}" placeholder="0">
-          </div>
-          <div class="form-group">
             <label class="form-label">Deviza</label>
             <select class="form-select" id="f-currency">
               <option value="HUF" ${item.currency !== 'EUR' ? 'selected' : ''}>HUF</option>
               <option value="EUR" ${item.currency === 'EUR' ? 'selected' : ''}>EUR</option>
             </select>
           </div>
-        </div>
-        <div class="form-row">
+          ${isSaving ? '' : `
           <div class="form-group">
             <label class="form-label">Ismétlés (hónap)</label>
             <input class="form-input" id="f-repeat" type="number" value="${item.repeat_every_x_months ?? 1}" min="1" max="24">
-          </div>
-          <div class="form-group" style="justify-content:flex-end;padding-top:20px">
+          </div>`}
+        </div>
+        ${isSaving ? `
+        <div class="form-row">
+          <div class="form-group" style="flex-direction:column;gap:10px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--text2)">
+              <input type="checkbox" id="f-liquid" ${item.is_liquid ? 'checked' : ''}>
+              Likvid megtakarítás (beleszámít a felhasználhatóba)
+            </label>
             ${isEdit ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--text2)">
               <input type="checkbox" id="f-active" ${item.is_active ? 'checked' : ''}> Aktív
             </label>` : ''}
           </div>
-        </div>
+        </div>` : `
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Kezdő év / hónap</label>
@@ -174,6 +179,13 @@ function showItemModal(item, title, isEdit) {
             </div>
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group" style="justify-content:flex-end;padding-top:20px">
+            ${isEdit ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--text2)">
+              <input type="checkbox" id="f-active" ${item.is_active ? 'checked' : ''}> Aktív
+            </label>` : ''}
+          </div>
+        </div>`}
         <div class="modal-actions">
           <button class="btn btn-ghost" onclick="closeModal()">Mégse</button>
           ${isEdit ? `<button class="btn btn-danger" onclick="app.deactivateItem('${item.id}')">Deaktivál</button>` : ''}
@@ -217,16 +229,17 @@ window.app_submitEditItem = async (id) => {
 function readModalForm() {
     const v = (id) => document.getElementById(id)?.value;
     const activeEl = document.getElementById('f-active');
+    const liquidEl = document.getElementById('f-liquid');
     return {
         name:                  v('f-name')?.trim(),
-        default_amount:        parseInt(v('f-default')) || null,
         currency:              v('f-currency'),
         repeat_every_x_months: parseInt(v('f-repeat')) || 1,
-        start_year:            parseInt(v('f-sy')),
-        start_month:           parseInt(v('f-sm')),
+        start_year:            parseInt(v('f-sy')) || state.year,
+        start_month:           parseInt(v('f-sm')) || 1,
         end_year:              v('f-ey') ? parseInt(v('f-ey')) : null,
         end_month:             v('f-em') ? parseInt(v('f-em')) : null,
         ...(activeEl !== null && { is_active: activeEl.checked }),
+        ...(liquidEl !== null && { is_liquid: liquidEl.checked }),
     };
 }
 
@@ -250,12 +263,13 @@ function renderMonthView() {
     const savings  = activeItems('saving');
     const liquids  = activeItems('liquid');
 
-    const totalIncome  = incomes.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
-    const totalExpense = expenses.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
-    const totalSaving  = savings.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
-    const available    = totalIncome - totalExpense - totalSaving;
-    const unpaid       = expenses.filter(i => !isPaid(i)).reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
-    const totalLiquid  = liquids.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
+    const totalIncome    = incomes.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
+    const totalExpense   = expenses.reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
+    const totalSaving    = savings.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
+    const totalLiquid    = liquids.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
+    const liquidSavings  = savings.filter(i => i.is_liquid).reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
+    const available      = totalLiquid - liquidSavings - totalExpense;
+    const unpaid         = expenses.filter(i => !isPaid(i)).reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
 
     // Tétel sor – fizetve toggle csak expense-nél
     const itemRow = (item, isSaving = false) => `

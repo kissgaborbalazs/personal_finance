@@ -139,3 +139,9 @@ CREATE POLICY "auth_only" ON exchange_rates FOR ALL USING (auth.role() = 'authen
 -- Futtasd le a Supabase SQL Editorban
 -- ============================================
 ALTER TABLE items ADD COLUMN IF NOT EXISTS default_amount NUMERIC(12, 0) DEFAULT NULL;
+
+-- ============================================
+-- MIGRATION: is_liquid oszlop hozzáadása (saving tételekhez)
+-- Jelöli, hogy a megtakarítás likvid-e (beleszámít a felhasználható összegbe)
+-- ============================================
+ALTER TABLE items ADD COLUMN IF NOT EXISTS is_liquid BOOLEAN NOT NULL DEFAULT FALSE;
