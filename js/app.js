@@ -285,8 +285,8 @@ function renderMonthView() {
     const totalSaving    = savings.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
     const totalLiquid    = liquids.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
     const liquidSavings  = savings.filter(i => i.is_liquid).reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
-    const available      = totalLiquid - liquidSavings - totalExpense;
     const unpaid         = expenses.filter(i => !isPaid(i)).reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
+    const available      = totalLiquid - liquidSavings - unpaid;
 
     // Tétel sor – fizetve toggle csak expense-nél
     const itemRow = (item, isSaving = false) => `
