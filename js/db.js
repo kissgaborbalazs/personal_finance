@@ -69,12 +69,22 @@ export const rateRepo = {
         return data;
     },
     fetchAndCache: async () => {
-        try {
-            const json = await fetch('https://api.frankfurter.app/latest?from=EUR&to=HUF').then(r => r.json());
-            const rate = json.rates.HUF;
-            await db.from('exchange_rates').insert({ currency: 'EUR', rate });
-            return rate;
-        } catch { return 395; }
+        const sources = [
+            () => fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.json')
+                    .then(r => r.json()).then(j => j.eur.huf),
+            () => fetch('https://api.frankfurter.app/latest?from=EUR&to=HUF')
+                    .then(r => r.json()).then(j => j.rates.HUF),
+        ];
+        for (const source of sources) {
+            try {
+                const rate = await source();
+                if (rate > 100) {
+                    await db.from('exchange_rates').insert({ currency: 'EUR', rate });
+                    return rate;
+                }
+            } catch { /* következő forrás */ }
+        }
+        return 395;
     },
     get: async () => {
         try {
