@@ -62,17 +62,31 @@ async function doLogout() {
 async function loadData() {
     state.loading = true;
     render();
-    const [itemsRes, valuesRes, balancesRes, rate] = await Promise.all([
+    const [itemsRes, valuesRes, monthBalancesRes, rate] = await Promise.all([
         itemsRepo.getAll(),
         valuesRepo.getForMonth(state.year, state.month),
         balancesRepo.getForMonth(state.year, state.month),
         rateRepo.get(),
     ]);
-    state.items    = itemsRes.data ?? [];
-    state.eurRate  = rate;
-    state.values   = Object.fromEntries((valuesRes.data ?? []).map(v => [v.item_id, v]));
-    state.balances = Object.fromEntries((balancesRes.data ?? []).map(b => [b.item_id, b.balance]));
-    state.loading  = false;
+    state.items   = itemsRes.data ?? [];
+    state.eurRate = parseFloat(rate) || 395;
+    state.values  = Object.fromEntries((valuesRes.data ?? []).map(v => [v.item_id, v]));
+    state.balances = Object.fromEntries((monthBalancesRes.data ?? []).map(b => [b.item_id, b.balance]));
+
+    // Saving tételekhez: legutolsó rögzített egyenleg, hónaptól függetlenül
+    const savingIds = state.items.filter(i => i.type === 'saving' && i.is_active).map(i => i.id);
+    if (savingIds.length) {
+        const { data } = await balancesRepo.getLatestForItems(savingIds);
+        const seen = new Set();
+        for (const b of (data ?? [])) {
+            if (!seen.has(b.item_id)) {
+                seen.add(b.item_id);
+                state.balances[b.item_id] = b.balance;
+            }
+        }
+    }
+
+    state.loading = false;
     render();
 }
 
@@ -99,7 +113,10 @@ async function saveBalance(item, rawValue) {
     const balance = parseInt(rawValue.replace(/\D/g, ''), 10) || 0;
     state.balances[item.id] = balance;
     render();
-    await balancesRepo.upsert(item.id, state.year, state.month, balance);
+    // Saving: mindig az aktuális dátumra ment (nem navigációs hónap)
+    const year  = item.type === 'saving' ? new Date().getFullYear() : state.year;
+    const month = item.type === 'saving' ? new Date().getMonth() + 1 : state.month;
+    await balancesRepo.upsert(item.id, year, month, balance);
 }
 
 // ── Navigáció ─────────────────────────────────────────────────────────────────

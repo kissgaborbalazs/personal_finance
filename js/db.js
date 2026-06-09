@@ -46,6 +46,14 @@ export const balancesRepo = {
     getForMonth: (year, month) =>
         db.from('balances').select('*').eq('year', year).eq('month', month),
 
+    // Legutolsó rögzített egyenleg per tétel (saving-okhoz, dátumtól függetlenül)
+    getLatestForItems: (itemIds) =>
+        db.from('balances')
+            .select('item_id, balance')
+            .in('item_id', itemIds)
+            .order('year', { ascending: false })
+            .order('month', { ascending: false }),
+
     upsert: (item_id, year, month, balance) =>
         db.from('balances')
             .upsert({ item_id, year, month, balance }, { onConflict: 'item_id,year,month' })
@@ -56,8 +64,8 @@ export const balancesRepo = {
 export const rateRepo = {
     getCached: async () => {
         const { data } = await db.from('exchange_rates')
-            .select('*').eq('currency', 'EUR')
-            .order('fetched_at', { ascending: false }).limit(1).single();
+            .select('rate, fetched_at').eq('currency', 'EUR')
+            .order('fetched_at', { ascending: false }).limit(1).maybeSingle();
         return data;
     },
     fetchAndCache: async () => {
@@ -69,8 +77,11 @@ export const rateRepo = {
         } catch { return 395; }
     },
     get: async () => {
-        const cached = await rateRepo.getCached();
-        if (cached && (Date.now() - new Date(cached.fetched_at)) / 3600000 < 24) return parseFloat(cached.rate);
-        return rateRepo.fetchAndCache();
+        try {
+            const cached = await rateRepo.getCached();
+            if (cached?.rate && (Date.now() - new Date(cached.fetched_at)) / 3600000 < 24)
+                return parseFloat(cached.rate);
+            return await rateRepo.fetchAndCache();
+        } catch { return 395; }
     }
 };
