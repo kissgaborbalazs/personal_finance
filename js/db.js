@@ -72,6 +72,8 @@ export const rateRepo = {
         const sources = [
             () => fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.json')
                     .then(r => r.json()).then(j => j.eur.huf),
+            () => fetch('https://open.er-api.com/v6/latest/EUR')
+                    .then(r => r.json()).then(j => j.rates.HUF),
             () => fetch('https://api.frankfurter.app/latest?from=EUR&to=HUF')
                     .then(r => r.json()).then(j => j.rates.HUF),
         ];
@@ -79,7 +81,8 @@ export const rateRepo = {
             try {
                 const rate = await source();
                 if (rate > 100) {
-                    await db.from('exchange_rates').insert({ currency: 'EUR', rate });
+                    // INSERT aszinkron, nem blokkolja és nem rontja a visszatérési értéket
+                    db.from('exchange_rates').insert({ currency: 'EUR', rate }).catch(() => {});
                     return rate;
                 }
             } catch { /* következő forrás */ }
