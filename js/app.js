@@ -2,15 +2,10 @@ import { itemsRepo, valuesRepo, balancesRepo, rateRepo, authRepo, isItemActiveIn
 
 // ── Állapot ───────────────────────────────────────────────────────────────────
 const state = {
-    year: new Date().getFullYear(),
+    year:  new Date().getFullYear(),
     month: new Date().getMonth() + 1,
-    view: 'month',
-    items: [],
-    values: {},
-    balances: {},
-    eurRate: 395,
-    loading: true,
-    user: null,
+    items: [], values: {}, balances: {},
+    eurRate: 395, loading: true, user: null,
 };
 
 const MONTHS_HU = ['Január','Február','Március','Április','Május','Június',
@@ -19,15 +14,13 @@ const MONTHS_HU = ['Január','Február','Március','Április','Május','Június'
 const fmt    = (n) => Math.round(n).toLocaleString('hu-HU') + ' Ft';
 const fmtEur = (n) => n.toLocaleString('hu-HU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €';
 
-const activeItems = (type) =>
-    state.items.filter(i => i.type === type && i.is_active && isItemActiveInMonth(i, state.year, state.month));
+const activeItems  = (type) => state.items.filter(i => i.type === type && i.is_active && isItemActiveInMonth(i, state.year, state.month));
+const getAmount    = (item) => state.values[item.id]?.amount ?? item.default_amount ?? 0;
+const isPaid       = (item) => state.values[item.id]?.is_paid ?? false;
+const getBalance   = (item) => state.balances[item.id] ?? 0;
+const toHUF        = (item, val) => item.currency === 'EUR' ? val * state.eurRate : val;
 
-const getAmount  = (item) => state.values[item.id]?.amount ?? 0;
-const isPaid     = (item) => state.values[item.id]?.is_paid ?? false;
-const getBalance = (item) => state.balances[item.id] ?? 0;
-const toHUF      = (item, val) => item.currency === 'EUR' ? val * state.eurRate : val;
-
-// ── Auth: login képernyő ──────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 function renderLogin(errorMsg = '') {
     document.getElementById('app').innerHTML = `
       <div class="login-screen">
@@ -81,10 +74,10 @@ async function loadData() {
     render();
 }
 
-// ── Kifizetés toggle ──────────────────────────────────────────────────────────
+// ── Kifizetés toggle (csak expense) ──────────────────────────────────────────
 async function togglePaid(item) {
     const newVal = !isPaid(item);
-    if (!state.values[item.id]) state.values[item.id] = { amount: 0, is_paid: false };
+    if (!state.values[item.id]) state.values[item.id] = { amount: getAmount(item), is_paid: false };
     state.values[item.id].is_paid = newVal;
     render();
     await valuesRepo.upsert(item.id, state.year, state.month, getAmount(item), newVal);
@@ -100,7 +93,6 @@ async function saveAmount(item, rawValue) {
     await valuesRepo.upsert(item.id, state.year, state.month, amount, isPaid(item));
 }
 
-// ── Egyenleg mentése ──────────────────────────────────────────────────────────
 async function saveBalance(item, rawValue) {
     const balance = parseInt(rawValue.replace(/\D/g, ''), 10) || 0;
     state.balances[item.id] = balance;
@@ -108,73 +100,84 @@ async function saveBalance(item, rawValue) {
     await balancesRepo.upsert(item.id, state.year, state.month, balance);
 }
 
-// ── Hónap navigáció ───────────────────────────────────────────────────────────
-function prevMonth() {
-    state.month === 1 ? (state.month = 12, state.year--) : state.month--;
-    loadData();
-}
-function nextMonth() {
-    state.month === 12 ? (state.month = 1, state.year++) : state.month++;
-    loadData();
-}
+// ── Navigáció ─────────────────────────────────────────────────────────────────
+function prevMonth() { state.month === 1 ? (state.month = 12, state.year--) : state.month--; loadData(); }
+function nextMonth() { state.month === 12 ? (state.month = 1, state.year++) : state.month++; loadData(); }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function toast(msg, type = '') {
     document.querySelectorAll('.toast').forEach(t => t.remove());
-    const el = document.createElement('div');
-    el.className = `toast ${type}`;
-    el.textContent = msg;
+    const el = Object.assign(document.createElement('div'), { className: `toast ${type}`, textContent: msg });
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 2800);
 }
 
 // ── Modal: tétel hozzáadása ───────────────────────────────────────────────────
 function showAddItemModal(type) {
-    const typeLabels = { income: 'bevétel', expense: 'kiadás', saving: 'megtakarítás', liquid: 'likvid számla' };
+    const labels = { income: 'bevétel', expense: 'kiadás', saving: 'megtakarítás', liquid: 'likvid számla' };
+    showItemModal({ type, start_year: state.year, start_month: state.month }, `Új ${labels[type]}`, false);
+}
+
+// ── Modal: tétel szerkesztése ─────────────────────────────────────────────────
+function showEditItemModal(id) {
+    const item = state.items.find(i => i.id === id);
+    if (!item) return;
+    showItemModal(item, 'Tétel szerkesztése', true);
+}
+
+function showItemModal(item, title, isEdit) {
     const html = `
     <div class="modal-overlay" id="modal">
       <div class="modal">
-        <div class="modal-title">Új ${typeLabels[type]}</div>
+        <div class="modal-title">${title}</div>
         <div class="form-group">
           <label class="form-label">Megnevezés</label>
-          <input class="form-input" id="f-name" placeholder="pl. Villanyóra" autofocus>
+          <input class="form-input" id="f-name" value="${item.name ?? ''}" placeholder="pl. Villanyóra" autofocus>
         </div>
         <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Alapértelmezett összeg</label>
+            <input class="form-input" id="f-default" type="number" value="${item.default_amount ?? ''}" placeholder="0">
+          </div>
           <div class="form-group">
             <label class="form-label">Deviza</label>
             <select class="form-select" id="f-currency">
-              <option value="HUF">HUF</option>
-              <option value="EUR">EUR</option>
+              <option value="HUF" ${item.currency !== 'EUR' ? 'selected' : ''}>HUF</option>
+              <option value="EUR" ${item.currency === 'EUR' ? 'selected' : ''}>EUR</option>
             </select>
           </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label class="form-label">Ismétlés (hónap)</label>
-            <input class="form-input" id="f-repeat" type="number" value="1" min="1" max="24">
+            <input class="form-input" id="f-repeat" type="number" value="${item.repeat_every_x_months ?? 1}" min="1" max="24">
+          </div>
+          <div class="form-group" style="justify-content:flex-end;padding-top:20px">
+            ${isEdit ? `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--text2)">
+              <input type="checkbox" id="f-active" ${item.is_active ? 'checked' : ''}> Aktív
+            </label>` : ''}
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">Kezdő év</label>
-            <input class="form-input" id="f-sy" type="number" value="${state.year}">
+            <label class="form-label">Kezdő év / hónap</label>
+            <div style="display:flex;gap:6px">
+              <input class="form-input" id="f-sy" type="number" value="${item.start_year ?? state.year}" style="width:70px">
+              <input class="form-input" id="f-sm" type="number" value="${item.start_month ?? state.month}" min="1" max="12" style="width:60px">
+            </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Kezdő hónap</label>
-            <input class="form-input" id="f-sm" type="number" value="${state.month}" min="1" max="12">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Záró év (opcionális)</label>
-            <input class="form-input" id="f-ey" type="number" placeholder="–">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Záró hónap</label>
-            <input class="form-input" id="f-em" type="number" placeholder="–" min="1" max="12">
+            <label class="form-label">Záró év / hónap</label>
+            <div style="display:flex;gap:6px">
+              <input class="form-input" id="f-ey" type="number" value="${item.end_year ?? ''}" placeholder="–" style="width:70px">
+              <input class="form-input" id="f-em" type="number" value="${item.end_month ?? ''}" placeholder="–" min="1" max="12" style="width:60px">
+            </div>
           </div>
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" onclick="closeModal()">Mégse</button>
-          <button class="btn btn-primary" onclick="submitAddItem('${type}')">Mentés</button>
+          ${isEdit ? `<button class="btn btn-danger" onclick="app.deactivateItem('${item.id}')">Deaktivál</button>` : ''}
+          <button class="btn btn-primary" onclick="${isEdit ? `app.submitEditItem('${item.id}')` : `submitAddItem('${item.type}')`}">Mentés</button>
         </div>
       </div>
     </div>`;
@@ -184,37 +187,57 @@ function showAddItemModal(type) {
 
 window.closeModal = () => document.getElementById('modal')?.remove();
 
+// ── Tétel mentése (új) ────────────────────────────────────────────────────────
 window.submitAddItem = async (type) => {
-    const name     = document.getElementById('f-name').value.trim();
-    const currency = document.getElementById('f-currency').value;
-    const repeat   = parseInt(document.getElementById('f-repeat').value) || 1;
-    const sy = parseInt(document.getElementById('f-sy').value);
-    const sm = parseInt(document.getElementById('f-sm').value);
-    const ey = document.getElementById('f-ey').value ? parseInt(document.getElementById('f-ey').value) : null;
-    const em = document.getElementById('f-em').value ? parseInt(document.getElementById('f-em').value) : null;
-    if (!name) return;
+    const payload = readModalForm();
+    if (!payload.name) return;
+    payload.type = type;
+    payload.sort_order = state.items.filter(i => i.type === type).length;
     closeModal();
-    const { data, error } = await itemsRepo.insert({
-        name, type, currency, repeat_every_x_months: repeat,
-        start_year: sy, start_month: sm, end_year: ey, end_month: em,
-        sort_order: state.items.filter(i => i.type === type).length
-    });
+    const { data, error } = await itemsRepo.insert(payload);
     if (error) { toast('Hiba: ' + error.message, 'error'); return; }
     state.items.push(data);
     render();
     toast('Tétel hozzáadva', 'success');
 };
 
+// ── Tétel mentése (szerkesztés) ───────────────────────────────────────────────
+window.app_submitEditItem = async (id) => {
+    const payload = readModalForm();
+    if (!payload.name) return;
+    closeModal();
+    const { data, error } = await itemsRepo.update(id, payload);
+    if (error) { toast('Hiba: ' + error.message, 'error'); return; }
+    const idx = state.items.findIndex(i => i.id === id);
+    if (idx !== -1) state.items[idx] = data;
+    render();
+    toast('Tétel frissítve', 'success');
+};
+
+function readModalForm() {
+    const v = (id) => document.getElementById(id)?.value;
+    const activeEl = document.getElementById('f-active');
+    return {
+        name:                  v('f-name')?.trim(),
+        default_amount:        parseInt(v('f-default')) || null,
+        currency:              v('f-currency'),
+        repeat_every_x_months: parseInt(v('f-repeat')) || 1,
+        start_year:            parseInt(v('f-sy')),
+        start_month:           parseInt(v('f-sm')),
+        end_year:              v('f-ey') ? parseInt(v('f-ey')) : null,
+        end_month:             v('f-em') ? parseInt(v('f-em')) : null,
+        ...(activeEl !== null && { is_active: activeEl.checked }),
+    };
+}
+
 // ── Inline összeg szerkesztő ──────────────────────────────────────────────────
 function makeAmountEditable(item, el, isSaving = false) {
     const current = isSaving ? getBalance(item) : getAmount(item);
-    const input = document.createElement('input');
-    input.className = 'amount-input';
-    input.value = current || '';
-    input.placeholder = '0';
+    const input = Object.assign(document.createElement('input'), {
+        className: 'amount-input', value: current || '', placeholder: '0'
+    });
     el.replaceWith(input);
-    input.focus();
-    input.select();
+    input.focus(); input.select();
     const save = () => isSaving ? saveBalance(item, input.value) : saveAmount(item, input.value);
     input.addEventListener('blur', save);
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
@@ -234,22 +257,45 @@ function renderMonthView() {
     const unpaid       = expenses.filter(i => !isPaid(i)).reduce((s, i) => s + toHUF(i, getAmount(i)), 0);
     const totalLiquid  = liquids.reduce((s, i) => s + toHUF(i, getBalance(i)), 0);
 
+    // Tétel sor – fizetve toggle csak expense-nél
     const itemRow = (item, isSaving = false) => `
-      <div class="item-row ${isPaid(item) ? 'paid' : ''}" data-id="${item.id}">
-        ${!isSaving ? `<button class="pay-toggle" onclick="app.togglePaid('${item.id}')">${isPaid(item) ? '✓' : ''}</button>` : ''}
-        <span class="item-name">${item.name}${item.currency === 'EUR' ? ' <small style="color:var(--text3)">EUR</small>' : ''}</span>
+      <div class="item-row ${item.type === 'expense' && isPaid(item) ? 'paid' : ''}" data-id="${item.id}">
+        ${item.type === 'expense'
+            ? `<button class="pay-toggle" onclick="app.togglePaid('${item.id}')">${isPaid(item) ? '✓' : ''}</button>`
+            : '<div style="width:28px;flex-shrink:0"></div>'
+        }
+        <span class="item-name" onclick="app.editItem('${item.id}')">${item.name}${item.currency === 'EUR' ? ' <small style="color:var(--text3)">€</small>' : ''}</span>
         <span class="item-amount" onclick="app.editAmount('${item.id}', this, ${isSaving})">${
             isSaving
             ? (getBalance(item) ? (item.currency === 'EUR' ? fmtEur(getBalance(item)) : fmt(getBalance(item))) : '— egyenleg')
             : (getAmount(item) ? fmt(toHUF(item, getAmount(item))) : '— összeg')
         }</span>
+        <button class="edit-btn" onclick="app.editItem('${item.id}')">✎</button>
       </div>`;
 
     const liquidCard = (item) => `
-      <div class="liquid-card" onclick="app.editBalance('${item.id}', this)">
-        <div class="liquid-name">${item.name}</div>
-        <div class="liquid-balance">${item.currency === 'EUR' ? fmtEur(getBalance(item)) : fmt(getBalance(item))}</div>
+      <div class="liquid-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div class="liquid-name">${item.name}</div>
+          <button class="edit-btn-sm" onclick="app.editItem('${item.id}')">✎</button>
+        </div>
+        <div class="liquid-balance" onclick="app.editBalance('${item.id}', this.closest('.liquid-card'))">${
+            item.currency === 'EUR' ? fmtEur(getBalance(item)) : fmt(getBalance(item))
+        }</div>
         ${item.currency === 'EUR' && getBalance(item) ? `<div class="liquid-balance-eur">≈ ${fmt(getBalance(item) * state.eurRate)}</div>` : ''}
+      </div>`;
+
+    const section = (title, type, items, total, isSaving = false) => `
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">${title}</span>
+          <span class="section-total">${fmt(total)}</span>
+          <button class="add-btn" onclick="app.addItem('${type}')">+ Hozzáad</button>
+        </div>
+        <div class="item-list">${items.length
+            ? items.map(i => itemRow(i, isSaving)).join('')
+            : `<div class="empty-state">Nincs tétel</div>`
+        }</div>
       </div>`;
 
     return `
@@ -275,51 +321,26 @@ function renderMonthView() {
           <div class="card-value" style="font-size:1.1rem;color:var(--blue)">${fmt(totalLiquid)}</div>
         </div>
       </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Bevételek</span>
-          <span class="section-total">${fmt(totalIncome)}</span>
-          <button class="add-btn" onclick="app.addItem('income')">+ Hozzáad</button>
-        </div>
-        <div class="item-list">${incomes.length ? incomes.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs bevétel ebben a hónapban</div>'}</div>
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Kiadások</span>
-          <span class="section-total">${fmt(totalExpense)}</span>
-          <button class="add-btn" onclick="app.addItem('expense')">+ Hozzáad</button>
-        </div>
-        <div class="item-list">${expenses.length ? expenses.map(i => itemRow(i)).join('') : '<div class="empty-state">Nincs kiadás ebben a hónapban</div>'}</div>
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Megtakarítások</span>
-          <span class="section-total">${fmt(totalSaving)}</span>
-          <button class="add-btn" onclick="app.addItem('saving')">+ Hozzáad</button>
-        </div>
-        <div class="item-list">${savings.length ? savings.map(i => itemRow(i, true)).join('') : '<div class="empty-state">Nincs megtakarítás</div>'}</div>
-      </div>
-
+      ${section('Bevételek', 'income', incomes, totalIncome)}
+      ${section('Kiadások', 'expense', expenses, totalExpense)}
+      ${section('Megtakarítások', 'saving', savings, totalSaving, true)}
       <div class="section">
         <div class="section-header">
           <span class="section-title">Likvid számlák</span>
           <span class="section-total" style="color:var(--blue)">${fmt(totalLiquid)}</span>
           <button class="add-btn" onclick="app.addItem('liquid')">+ Hozzáad</button>
         </div>
-        <div class="liquid-grid">${liquids.length ? liquids.map(liquidCard).join('') : '<div class="empty-state">Nincs likvid számla</div>'}</div>
+        <div class="liquid-grid">${liquids.length
+            ? liquids.map(liquidCard).join('')
+            : '<div class="empty-state">Nincs likvid számla</div>'
+        }</div>
       </div>`;
 }
 
-// ── Render: fő ────────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
 function render() {
     const appEl = document.getElementById('app');
-    if (state.loading) {
-        appEl.innerHTML = `<div class="loading"><div class="spinner"></div>Betöltés...</div>`;
-        return;
-    }
+    if (state.loading) { appEl.innerHTML = `<div class="loading"><div class="spinner"></div>Betöltés...</div>`; return; }
     appEl.innerHTML = `
       <header class="app-header">
         <span class="app-title">HáziPénz</span>
@@ -342,11 +363,20 @@ function render() {
 
 // ── Publikus API ──────────────────────────────────────────────────────────────
 window.app = {
-    prevMonth,
-    nextMonth,
+    prevMonth, nextMonth,
     login:   doLogin,
     logout:  doLogout,
     addItem: showAddItemModal,
+    editItem: (id) => showEditItemModal(id),
+    submitEditItem: (id) => app_submitEditItem(id),
+    deactivateItem: async (id) => {
+        closeModal();
+        await itemsRepo.deactivate(id);
+        const item = state.items.find(i => i.id === id);
+        if (item) item.is_active = false;
+        render();
+        toast('Tétel deaktiválva');
+    },
     togglePaid: (id) => { const item = state.items.find(i => i.id === id); if (item) togglePaid(item); },
     editAmount: (id, el, isSaving) => { const item = state.items.find(i => i.id === id); if (item) makeAmountEditable(item, el, isSaving); },
     editBalance: (id, card) => {
@@ -357,16 +387,14 @@ window.app = {
     },
 };
 
-// ── Indítás: session ellenőrzés ───────────────────────────────────────────────
+// ── Indítás ───────────────────────────────────────────────────────────────────
 authRepo.onAuthChange((event, session) => {
     state.user = session?.user ?? null;
-    if (state.user) loadData();
-    else renderLogin();
+    if (state.user) loadData(); else renderLogin();
 });
 
 (async () => {
     const { data } = await authRepo.getSession();
     state.user = data?.session?.user ?? null;
-    if (state.user) loadData();
-    else renderLogin();
+    if (state.user) loadData(); else renderLogin();
 })();

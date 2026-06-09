@@ -113,3 +113,29 @@ CREATE POLICY "public_all" ON items FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON monthly_values FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON balances FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_all" ON exchange_rates FOR ALL USING (true) WITH CHECK (true);
+
+-- ============================================
+-- AUTH BEKAPCSOLÁSA UTÁN FUTTATANDÓ
+-- Supabase Dashboard > Authentication > Enable Email provider
+-- Majd hozz létre egy felhasználót:
+--   Authentication > Users > Invite user
+-- Végül futtasd le az alábbi policy frissítéseket:
+-- ============================================
+
+-- Régi public policy-k törlése
+DROP POLICY IF EXISTS "public_all" ON items;
+DROP POLICY IF EXISTS "public_all" ON monthly_values;
+DROP POLICY IF EXISTS "public_all" ON balances;
+DROP POLICY IF EXISTS "public_all" ON exchange_rates;
+
+-- Csak bejelentkezett user férhet hozzá
+CREATE POLICY "auth_only" ON items          FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "auth_only" ON monthly_values FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "auth_only" ON balances       FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "auth_only" ON exchange_rates FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+
+-- ============================================
+-- MIGRATION: default_amount oszlop hozzáadása
+-- Futtasd le a Supabase SQL Editorban
+-- ============================================
+ALTER TABLE items ADD COLUMN IF NOT EXISTS default_amount NUMERIC(12, 0) DEFAULT NULL;
